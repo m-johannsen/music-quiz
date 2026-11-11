@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="de" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Musikratespiel">
+<title>Musikratespiel</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2.0.6/css/pico.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&display=swap">
+<style>
+  html:root[data-theme="light"] {
+    --pico-font-size: 112.5%;
+    --pico-border-radius: .75rem;
+    --pico-background-color: #f1f4f3;
+    --pico-card-background-color: #fff;
+    --pico-color: #1d2a28;
+    --pico-primary: #0b7a75;
+    --pico-primary-background: #0b7a75;
+    --pico-primary-hover: #095f5b;
+    --pico-primary-hover-background: #095f5b;
+    --pico-primary-focus: rgba(11, 122, 117, .25);
+    --pico-primary-inverse: #fff;
+    --amber: #f5b83d;
+    --display: 'Bricolage Grotesque', var(--pico-font-family);
+  }
+  h1 { font-family: var(--display); font-size: 1.7rem; margin: .5rem 0 1rem; }
+
+  #stage { padding: 0; overflow: hidden; }
+  #video { position: relative; aspect-ratio: 16 / 9; overflow: hidden; background: #000; pointer-events: none; }
+  #video iframe { width: 100%; height: 100%; transform: scale(1.15); filter: blur(28px) brightness(.8); }
+  #video.loading iframe { opacity: 0; }   /* hide player until the new song is ready */
+  #video.revealed iframe { transform: none; filter: none; transition: .4s; }   /* animate only when revealing */
+  #wave { position: absolute; right: 8px; bottom: 8px; height: 30px; display: none; }
+  .playing #wave { display: block; }
+
+  .answers { padding: 1rem 1.25rem .5rem; }
+  .answer { font-family: var(--display); font-weight: 800; font-size: 1.4rem; line-height: 1.2; margin: 0 0 .8rem; }
+  .answer.hidden { color: transparent; background: #dfe6e4; border-radius: .4rem; user-select: none; }
+  #year { display: inline-block; min-width: 5ch; font-size: 3rem; line-height: 1.1; border-radius: .5rem; }
+  #year:not(.hidden) { background: var(--amber); color: #2b2100; padding: 0 .6rem; }
+
+  .row { display: flex; gap: .75rem; margin-bottom: 1rem; }
+  .row button { margin: 0; }
+  #toggle { flex: none; width: 4.5rem; padding: 0; font-size: 1.4rem; }
+  #main svg { width: 1.4em; height: 1.4em; vertical-align: -.3em; margin-right: .5rem; }
+  #main { flex: 1; padding: 1.1rem; font-size: 1.25rem; font-weight: 700; }
+  #msg { color: var(--pico-del-color); margin: 0 0 .5rem; min-height: 0; }
+  .center { text-align: center; }
+  p.center a, footer.center a { margin: 0 .75rem; }
+</style>
+</head>
+<body>
+<main class="container">
+
+<h1>Musikratespiel</h1>
+
+<select id="select" onchange="selectPlaylist(this.value)" aria-label="Playlist wählen"></select>
+<small id="msg"></small>
+
+<article id="stage">
+  <div id="video">
+    <div id="player"></div>
+    <img id="wave" src="soundwave.gif" alt="">
+  </div>
+  <div class="answers">
+    <p id="artist" class="answer hidden">██████████</p>
+    <p id="title" class="answer hidden">████████████</p>
+    <p id="year" class="answer hidden">████</p>
+  </div>
+</article>
+
+<div class="row">
+  <button id="toggle" class="outline" onclick="togglePlay()" aria-label="Abspielen / Pause" disabled>▶︎</button>
+  <button id="main" onclick="mainAction()" disabled>Song abspielen</button>
+</div>
+<p class="center"><a href="#" id="skip" onclick="event.preventDefault(); nextSong()">Song überspringen</a></p>
+
+<details>
+  <summary>Bisher gespielt</summary>
+  <ul id="history"></ul>
+</details>
+
+<footer class="center">
+  <a href="#" onclick="event.preventDefault(); rules.showModal()">Spielregeln</a>
+  <a href="#" onclick="event.preventDefault(); openAdd()">Eigene Playlist</a>
+</footer>
+
+</main>
+
+<dialog id="add">
+  <article>
+    <header>
+      <button aria-label="Schließen" rel="prev" onclick="add.close()"></button>
+      <strong>Eigene Playlist</strong>
+    </header>
+    <p>Link zu einer CSV im Hitster-Format: eine Datei auf GitHub oder ein Google Sheet
+      (freigegeben für „Jeder mit dem Link“ oder im Web veröffentlicht).</p>
+    <input id="add-url" placeholder="https://docs.google.com/spreadsheets/d/…" autocapitalize="off">
+    <input id="add-name" placeholder="Name (optional)">
+    <button onclick="addExternal()">Hinzufügen</button>
+    <div id="ext-list"></div>
+    <footer>
+      <button class="secondary" onclick="copyShareLink()">Link mit meinen Playlists kopieren</button>
+    </footer>
+  </article>
+</dialog>
+
+<dialog id="rules">
+  <article>
+    <header>
+      <button aria-label="Schließen" rel="prev" onclick="rules.close()"></button>
+      <strong>Spielregeln</strong>
+    </header>
+
+      <h5>Vorbereitung</h5>
+      <ul>
+        <li>Entscheidet, ob ihr im Team oder einzeln spielt. Jeder Spieler / Jedes Team benötigt einen Stift und einen Stapel mit leeren Karten.</li>
+        <li>Zuerst wird der DJ ausgewählt. Er spielt über diese App die Songs ab.</li>
+        <li>Jeder Spieler / Jedes Team bekommt einen Song vorgespielt und notiert sich Songtitel, Künstler und Jahr. Diese Karte dient als Startpunkt der eigenen Zeitachse.</li>
+        <li>Für ein einfacheres Spiel könnt ihr ohne Token spielen. Für mehr Herausforderung bekommt jeder 2 HITSTER-Token.</li>
+      </ul>
+
+      <h5>Spielablauf</h5>
+      <p><strong>Abspielen</strong><br>
+        Der DJ drückt <em>Play</em> in der App – der Song beginnt zu spielen.
+        Künstler, Titel und Jahr sind zensiert.</p>
+      <p><strong>Platzieren</strong><br>
+        Der aktive Spieler links nimmt sich eine leeren Karte und legt sie auf seine Zeitachse
+        – er rät, ob sie vor, nach oder zwischen die bestehenden Karten gehört.</p>
+      <p><strong>Aufdecken</strong><br>
+        Der DJ drückt <em>Auflösen</em> in der App – Künstler, Titel und Jahr werden enthüllt.
+        Liegt sie richtig, schreibt der Spieler Songtitel, Künstler und Jahre darauf und behält sie.
+        Liegt sie falsch, legt er sie zurück auf den Stapel mit leeren Karten.
+        Karten mit identischem Jahr dürfen direkt davor oder dahinter gelegt werden – das gilt als korrekt.</p>
+      <p><strong>Nächster Song</strong><br>
+        Der DJ drückt <em>Nächster Song</em>, um weiterzumachen.</p>
+
+      <h5>Gewinnen</h5>
+      <p>Der erste Spieler, der <strong>10 Karten</strong> korrekt auf seiner Zeitachse platziert, gewinnt.</p>
+
+      <h5>HITSTER-Token</h5>
+      <ul>
+        <li><strong>Wenn du dran bist:</strong> Zahle 1 Token, um den aktuellen Song zu überspringen.</li>
+        <li><strong>Wenn ein Mitspieler dran ist:</strong> Ruf „HITSTER", wenn du glaubst, dass dein Mitspieler falsch gelegt hat. Lege deinen Token auf die Zeitachse des Gegners an die Stelle, die du für richtig hälst. Hast du recht, nimmst du die Karte auf deine Zeitachse.</li>
+        <li><strong>Jederzeit:</strong> Tausche 3 Token, um den einen Song sofort zu enthüllen und die Karte direkt (ohne Raten) auf deine Zeitachse zu legen. Das geht auch außerhalb deines Zuges.</li>
+      </ul>
+      <p><strong>Token verdienen:</strong> Nennst du Songtitel und Künstler korrekt, erhältst du 1 Token – auch wenn die Karte falsch liegt. Maximum: 5 Token pro Spieler.</p>
+
+      <h5>Weitere Token-Regeln</h5>
+      <ul>
+        <li>Liegt eine angefochtene Karte doch richtig (auch bei identischem Jahr), behält der ursprüngliche Spieler sie und der Token ist verloren.</li>
+        <li>Wetten mehrere Spieler gleichzeitig, bleibt die Karte beim ursprünglichen Spieler und alle verlieren ihre Token.</li>
+        <li>Der erste, der „HITSTER" ruft, legt zuerst. Weitere Token müssen auf andere Stellen der Zeitachse gelegt werden – zwei Token dürfen nicht auf denselben Platz.</li>
+      </ul>
+
+  </article>
+</dialog>
+
+<script>
+const $ = id => document.getElementById(id);
+const store = {   // may be wiped or blocked (Safari)
+  get(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+};
+try { navigator.storage?.persist?.(); } catch {}
+
+let playlists = [];                 // {id, name, url, external, songs}
+let current = null;                 // selected playlist
+let song = null, started = false, revealed = false;   // started: this song was played once
+const played = new Set();           // video ids already played in this round
+const failed = new Set(store.get('failed', []));
+
+const say = text => $('msg').textContent = text || '';
+
+// ── CSV ────────────────────────────────────────────────────────────────────
+function parseCsv(text) {
+  const rows = []; let row = [], cell = '', quoted = false;
+  text = text.replace(/^﻿/, '');
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quoted) {
+      if (c !== '"') cell += c;
+      else if (text[i + 1] === '"') { cell += '"'; i++; }
+      else quoted = false;
+    } else if (c === '"') quoted = true;
+    else if (c === ',') { row.push(cell); cell = ''; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i + 1] === '\n') i++;
+      row.push(cell); cell = ''; rows.push(row); row = [];
+    } else cell += c;
+  }
+  if (cell || row.length) rows.push([...row, cell]);
+  const head = rows.shift().map(h => h.trim());
+  return rows.filter(r => r.some(x => x.trim()))
+             .map(r => Object.fromEntries(head.map((h, i) => [h, (r[i] ?? '').trim()])));
+}
+
+function videoId(url) {
+  try {
+    const u = new URL(url);
+    if (u.hostname === 'youtu.be') return u.pathname.slice(1);
+    if (u.hostname.endsWith('youtube.com')) return u.searchParams.get('v');
+  } catch {}
+}
+
+function parseSongs(text) {
+  return parseCsv(text)
+    .map(r => ({ id: videoId(r.URL), artist: r.Artist, title: r.Title, year: r.Year }))
+    .filter(s => s.id);   // also skips "-1" rows and songs without a link
+}
+
+// GitHub / Google Sheets share links -> directly fetchable CSV
+function csvUrl(raw) {
+  const u = new URL(raw);
+  const gh = u.hostname === 'github.com' && u.pathname.match(/^\/([^/]+\/[^/]+)\/blob\/(.+)/);
+  if (gh) return `https://raw.githubusercontent.com/${gh[1]}/${gh[2]}`;
+  const sheet = u.hostname === 'docs.google.com' && u.pathname.match(/^\/spreadsheets\/d\/([\w-]+)\/(?!pub)/);
+  if (sheet) {
+    const gid = (u.hash + u.search).match(/gid=(\d+)/)?.[1] ?? 0;
+    return `https://docs.google.com/spreadsheets/d/${sheet[1]}/export?format=csv&gid=${gid}`;
+  }
+  return u.href;
+}
+
+// ── YouTube player ─────────────────────────────────────────────────────────
+let yt, ytReady = false, ytQueued;
+
+function onYouTubeIframeAPIReady() {
+  yt = new YT.Player('player', {
+    width: '100%', height: '100%',
+    playerVars: { playsinline: 1, controls: 0, disablekb: 1, fs: 0, rel: 0, origin: location.origin },
+    events: {
+      onReady() { ytReady = true; if (ytQueued) ytLoad(...ytQueued); render(); },
+      onStateChange: e => {
+        if ([YT.PlayerState.PLAYING, YT.PlayerState.PAUSED, YT.PlayerState.CUED].includes(e.data))
+          { $('video').classList.remove('loading'); say(); }
+        const playing = e.data === YT.PlayerState.PLAYING;
+        $('video').classList.toggle('playing', playing);
+        $('toggle').textContent = playing ? '❚❚' : '▶︎';
+        keepScreenOn(playing);
+      },
+      onError: e => {
+        // 2: bad id, 100: removed/private, 101/150: embedding disabled
+        if ([2, 100, 101, 150].includes(e.data) && song) {
+          failed.add(song.id); store.set('failed', [...failed]);
+        }
+        say('Song nicht abspielbar – nächster Song');
+        song = null;   // keep it out of the history
+        nextSong();
+      },
+    },
+  });
+}
+function ytLoad(id, autoplay) {
+  if (!ytReady) { ytQueued = [id, autoplay]; return; }
+  autoplay ? yt.loadVideoById(id) : yt.cueVideoById(id);
+}
+
+// ── Playlists ──────────────────────────────────────────────────────────────
+const externals = () => store.get('ext', []);   // [{url, name}]
+
+async function init() {
+  try {
+    const index = parseCsv(await (await fetch('playlists/published.csv')).text());
+    playlists = index.map(r => ({ id: r.File, name: r.Game, url: 'playlists/' + r.File }));
+  } catch { say('Playlists konnten nicht geladen werden.'); }
+
+  // ?pl=<url>&name=<name> restores external playlists from a shared link
+  const q = new URLSearchParams(location.search);
+  const ext = externals();
+  q.getAll('pl').forEach((url, i) => {
+    if (!ext.some(e => e.url === url)) ext.push({ url, name: q.getAll('name')[i] || 'Playlist' });
+  });
+  store.set('ext', ext);
+  playlists.push(...ext.map(e => ({ id: e.url, name: e.name + ' ↗', url: e.url, external: true })));
+
+  renderSelect(store.get('last'));
+  selectPlaylist($('select').value);
+}
+
+function renderSelect(selected) {
+  const sel = $('select');
+  sel.innerHTML = playlists.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+  if (playlists.some(p => p.id === selected)) sel.value = selected;
+}
+
+async function selectPlaylist(id) {
+  current = playlists.find(p => p.id === id);
+  store.set('last', id);
+  song = null; played.clear(); $('history').innerHTML = '';
+  if (ytReady) yt.stopVideo();
+  say(); render();
+  if (!current) return;
+  try {
+    if (!current.songs) {
+      const res = await fetch(current.external ? csvUrl(current.url) : current.url);
+      if (!res.ok) throw new Error(res.status);
+      current.songs = parseSongs(await res.text());
+    }
+  } catch {
+    say(current.external ? 'Playlist nicht ladbar – Link und Freigabe prüfen.' : 'Playlist nicht ladbar.');
+    return;
+  }
+  if (current.id === id) nextSong(false);
+}
+
+// ── Game ───────────────────────────────────────────────────────────────────
+// Random song, avoiding repeats; each decade weighted by 1/sqrt(songs in it)
+function pickSong() {
+  const ok = current.songs.filter(s => !failed.has(s.id));
+  const fresh = ok.filter(s => !played.has(s.id));
+  const pool = fresh.length ? fresh : ok;
+  const decade = s => Math.floor(s.year / 10);
+  const count = {};
+  pool.forEach(s => count[decade(s)] = (count[decade(s)] || 0) + 1);
+  const weight = s => 1 / Math.sqrt(count[decade(s)]);
+  let r = Math.random() * pool.reduce((sum, s) => sum + weight(s), 0);
+  return pool.find(s => (r -= weight(s)) <= 0) ?? pool[0];
+}
+
+function nextSong(autoplay = true) {
+  if (!current?.songs) return;
+  if (song) {
+    played.add(song.id);
+    $('history').insertAdjacentHTML('afterbegin',
+      `<li>${esc(song.artist)} – ${esc(song.title)} (${esc(song.year)})</li>`);
+  }
+  song = pickSong();
+  started = autoplay;
+  revealed = false;
+  if (!song) { say('Keine abspielbaren Songs in dieser Playlist.'); render(); return; }
+  $('video').classList.add('loading');
+  ytLoad(song.id, autoplay);
+  render();
+}
+
+// One button guides the round: Song abspielen -> Auflösen -> Nächster Song (plays right away)
+function mainAction() {
+  if (!started) { started = true; yt.playVideo(); render(); }
+  else if (!revealed) reveal();
+  else nextSong();
+}
+function reveal() { revealed = true; render(); }
+
+// Keep the phone screen on while a song plays, otherwise the music stops
+let wakeLock;
+function keepScreenOn(on) {
+  if (on) navigator.wakeLock?.request('screen').then(l => wakeLock = l).catch(() => {});
+  else { wakeLock?.release().catch(() => {}); wakeLock = null; }
+}
+
+function togglePlay() {
+  if (!ytReady) return;
+  if (!started) { started = true; render(); }
+  yt.getPlayerState() === YT.PlayerState.PLAYING ? yt.pauseVideo() : yt.playVideo();
+}
+
+const PLACEHOLDER = { artist: '██████████', title: '████████████', year: '████' };
+
+const svg = body => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+const ICON = {
+  play: svg('<polygon points="6 4 20 12 6 20" fill="currentColor"/>'),
+  eye:  svg('<path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/>'),
+  next: svg('<polygon points="5 4 15 12 5 20" fill="currentColor"/><line x1="19" y1="5" x2="19" y2="19"/>'),
+};
+
+function render() {
+  $('video').classList.toggle('revealed', revealed);
+  for (const k of ['artist', 'title', 'year']) {
+    $(k).textContent = revealed ? song[k] || '—' : PLACEHOLDER[k];
+    $(k).classList.toggle('hidden', !revealed);
+  }
+  $('toggle').disabled = $('main').disabled = !song || !ytReady;
+  $('main').innerHTML = !started ? ICON.play + 'Song abspielen'
+                      : revealed ? ICON.next + 'Nächster Song' : ICON.eye + 'Auflösen';
+  $('skip').hidden = !started;
+}
+
+// ── Own playlists ──────────────────────────────────────────────────────────
+function renderExternals() {
+  $('ext-list').innerHTML = externals().map((e, i) =>
+    `<p>${esc(e.name)} <a href="#" onclick="removeExternal(${i})">entfernen</a></p>`).join('');
+}
+function openAdd() { renderExternals(); add.showModal(); }
+
+async function addExternal() {
+  const raw = $('add-url').value.trim();
+  if (!raw) return;
+  let songs;
+  try {
+    const res = await fetch(csvUrl(raw));
+    if (!res.ok) throw new Error(res.status);
+    songs = parseSongs(await res.text());
+  } catch { alert('Laden fehlgeschlagen. Link und Freigabe prüfen.'); return; }
+  if (!songs.length) { alert('Keine Songs mit YouTube-Link gefunden. Format prüfen.'); return; }
+
+  const name = $('add-name').value.trim() || (raw.includes('docs.google.com') ? 'Google Sheet' : raw.split('/').pop().replace(/\.csv$/, ''));
+  store.set('ext', [...externals().filter(e => e.url !== raw), { url: raw, name }]);
+  playlists = playlists.filter(p => p.id !== raw);
+  playlists.push({ id: raw, name: name + ' ↗', url: raw, external: true, songs });
+  renderSelect(raw);
+  $('add-url').value = $('add-name').value = '';
+  add.close();
+  selectPlaylist(raw);
+}
+
+function removeExternal(i) {
+  const ext = externals();
+  const [gone] = ext.splice(i, 1);
+  store.set('ext', ext);
+  playlists = playlists.filter(p => p.id !== gone.url);
+  renderSelect($('select').value);
+  renderExternals();
+  selectPlaylist($('select').value);
+}
+
+async function copyShareLink() {
+  const q = new URLSearchParams();
+  externals().forEach(e => { q.append('pl', e.url); q.append('name', e.name); });
+  const link = location.origin + location.pathname + '?' + q;
+  try { await navigator.clipboard.writeText(link); say('Link kopiert.'); add.close(); }
+  catch { prompt('Link kopieren:', link); }
+}
+
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+init();
+</script>
+<script src="https://www.youtube.com/iframe_api"></script>
+</body>
+</html>
