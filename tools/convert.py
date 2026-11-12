@@ -62,8 +62,10 @@ def search(query, cache):
         try:
             with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": True}) as ydl:
                 entry = (ydl.extract_info(f"ytsearch1:{query}", download=False).get("entries") or [None])[0]
-            cache[query] = entry and {"id": entry["id"], "title": entry.get("title", ""),
-                                      "duration": entry.get("duration")}
+            if not entry:
+                return None   # not cached, so a rerun retries it
+            cache[query] = {"id": entry["id"], "title": entry.get("title", ""),
+                            "duration": entry.get("duration")}
         except Exception as e:
             print(f"  Suche fehlgeschlagen für {query!r}: {e}", file=sys.stderr)
             return None   # not cached, so a rerun retries it
