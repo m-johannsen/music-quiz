@@ -51,6 +51,13 @@
   #msg { color: var(--pico-del-color); margin: 0 0 .5rem; min-height: 0; }
   .center { text-align: center; }
   p.center a, footer.center a { margin: 0 .75rem; }
+  
+  /* wide screens: narrower page, video and answers side by side so the buttons stay in view */
+  main.container { max-width: 760px; }
+  @media (min-width: 640px) {
+    #stage { display: grid; grid-template-columns: 1.1fr 1fr; align-items: center; }
+    .answers { padding: 1.25rem 1.5rem .75rem; }
+  }
 </style>
 </head>
 <body>
