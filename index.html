@@ -284,34 +284,50 @@ async function init() {
 
 function renderSelect(selected) {
   const sel = $('select');
-  sel.innerHTML = playlists.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
-  if (playlists.some(p => p.id === selected)) sel.value = selected;
+  sel.innerHTML = `<option value="${ALL}">🎲 Zufällig aus allen Playlists</option>` + playlists.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+  if (selected === ALL || playlists.some(p => p.id === selected)) sel.value = selected;
+}
+
+async function loadSongs(p) {
+  if (!p.songs) {
+    const res = await fetch(p.external ? csvUrl(p.url) : p.url);
+    if (!res.ok) throw new Error(res.status);
+    p.songs = parseSongs(await res.text());
+  }
+  return p.songs;
 }
 
 async function selectPlaylist(id) {
-  current = playlists.find(p => p.id === id);
+  current = id === ALL ? { id: ALL, name: 'Zufällig', all: true, songs: [] } : playlists.find(p => p.id === id);
   store.set('last', id);
   song = null; played.clear(); $('history').innerHTML = '';
   if (ytReady) yt.stopVideo();
   say(); render();
   if (!current) return;
   try {
-    if (!current.songs) {
-      const res = await fetch(current.external ? csvUrl(current.url) : current.url);
-      if (!res.ok) throw new Error(res.status);
-      current.songs = parseSongs(await res.text());
-    }
+    if (!current.all) await loadSongs(current);
   } catch {
     say(current.external ? 'Playlist nicht ladbar – Link und Freigabe prüfen.' : 'Playlist nicht ladbar.');
     return;
   }
-  if (current.id === id) nextSong(false);
+  if (current.id === id) await nextSong(false);
 }
 
 // ── Game ───────────────────────────────────────────────────────────────────
 // Random song, avoiding repeats; each decade weighted by 1/sqrt(songs in it)
-function pickSong() {
-  const ok = current.songs.filter(s => !failed.has(s.id));
+const ALL = '__all__';
+
+// "All playlists" mode: random playlist first, then a song from it
+async function pickFromAll() {
+  const left = [...playlists];
+  while (left.length) {
+    const p = left.splice(Math.floor(Math.random() * left.length), 1)[0];
+    try { const song = pickSong(await loadSongs(p)); if (song) return song; } catch {}
+  }
+}
+
+function pickSong(songs = current.songs) {
+  const ok = songs.filter(s => !failed.has(s.id));
   const fresh = ok.filter(s => !played.has(s.id));
   const pool = fresh.length ? fresh : ok;
   const decade = s => Math.floor(s.year / 10);
@@ -322,14 +338,16 @@ function pickSong() {
   return pool.find(s => (r -= weight(s)) <= 0) ?? pool[0];
 }
 
-function nextSong(autoplay = true) {
+async function nextSong(autoplay = true) {
   if (!current?.songs) return;
+  const cur = current;
   if (song) {
     played.add(song.id);
     $('history').insertAdjacentHTML('afterbegin',
       `<li>${esc(song.artist)} – ${esc(song.title)} (${esc(song.year)})</li>`);
   }
-  song = pickSong();
+  song = cur.all ? await pickFromAll() : pickSong();
+  if (current !== cur) return;   // playlist changed while loading
   started = autoplay;
   revealed = false;
   if (!song) { say('Keine abspielbaren Songs in dieser Playlist.'); render(); return; }
