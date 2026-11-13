@@ -2,9 +2,13 @@
 
     uv run tools/years.py playlists/mix.csv            # only report
     uv run tools/years.py playlists/mix.csv --apply    # write corrected years into the file
+    uv run tools/years.py playlists/mix.csv --albums export.csv   # also use album names for the reissue check
+    uv run tools/years.py playlists/mix.csv --all      # check every song
 
 Spotify gives the year of the album, so reissues and best-of albums show up as too late.
 Only earlier MusicBrainz years are applied; later ones are listed for manual review.
+By default only songs that look like reissues are checked (REISSUE pattern from convert.py on the title and,
+with --albums export.csv, on the Exportify album name). Use --all to check every song.
 Needs about one second per song (MusicBrainz rate limit); answers are cached in tools/.mb-cache.json.
 """
 import argparse
@@ -17,6 +21,8 @@ import unicodedata
 import urllib.parse
 import urllib.request
 from pathlib import Path
+
+from convert import REISSUE
 
 CACHE = Path(__file__).with_name(".mb-cache.json")
 API = "https://musicbrainz.org/ws/2/recording/"
@@ -73,6 +79,9 @@ def lookup(artist, title, cache):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("csv", type=Path)
+    ap.add_argument("--all", action="store_true", help="alle Songs prüfen, nicht nur Neuauflagen-Verdächtige")
+    ap.add_argument("--albums", type=Path, nargs="*", default=[], metavar="EXPORT.csv",
+                    help="Exportify-CSV(s): Albumnamen für die Neuauflagen-Erkennung")
     ap.add_argument("--apply", action="store_true", help="frühere MusicBrainz-Jahre in die Datei schreiben")
     args = ap.parse_args()
 
@@ -80,10 +89,23 @@ def main():
         reader = csv.DictReader(f)
         fields, rows = reader.fieldnames, list(reader)
     cache = json.loads(CACHE.read_text()) if CACHE.exists() else {}
+    albums = {}
+    for path in args.albums:
+        with open(path, encoding="utf-8-sig", newline="") as f:
+            for e in csv.DictReader(f):
+                albums[(e["Artist Name(s)"].split(";")[0].strip(), e["Track Name"].strip())] = e.get("Album Name", "")
+
+    def suspicious(r):
+        return args.all or bool(REISSUE.search(r["Title"]) or REISSUE.search(albums.get((r["Artist"], r["Title"]), "")))
+
+    if not args.all and not albums:
+        print("Hinweis: ohne --albums wird nur der Titel auf Neuauflagen geprüft.", file=sys.stderr)
 
     earlier, later, missing = [], [], []
     for i, r in enumerate(rows, 1):
         if r.get("Card#", "").strip() == "-1" or not r["Year"].isdigit():
+            continue
+        if not suspicious(r) and f"{r['Artist']}|{r['Title']}" not in cache:
             continue
         fresh = f"{r['Artist']}|{r['Title']}" not in cache
         mb = lookup(r["Artist"], r["Title"], cache)
